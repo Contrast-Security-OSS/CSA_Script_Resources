@@ -60,8 +60,8 @@ Notes:
 
 - `.env` is git-ignored.
 - `example.env` is the committed template.
-- Scripts and notebooks both support legacy key names (`TeamserverURL`, `AUTH`, `API_KEY`) in addition to the flat keys shown above.
-- `--env-section` is only needed when using a legacy sectioned `.env` file.
+- Scripts and notebooks support the flat keys shown above from root `.env`.
+- Legacy key names (`TeamserverURL`, `AUTH`, `API_KEY`) are still accepted for compatibility.
 
 ## Notebook / Jupyter Workflow
 

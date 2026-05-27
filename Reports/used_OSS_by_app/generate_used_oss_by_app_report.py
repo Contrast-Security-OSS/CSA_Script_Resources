@@ -8,14 +8,12 @@ Outputs:
 
 Example:
   python3 generate_used_oss_by_app_report.py \
-      --env-file .env \
-      --env-section "Staging Auth"
+    --env-file .env
 """
 
 import argparse
 import csv
 import os
-import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -33,8 +31,8 @@ def find_repo_root(start: Path) -> Path:
     return current
 
 
-def load_env_file(env_path: Path, section: Optional[str] = None) -> dict:
-    """Parse flat or sectioned .env credentials and return normalized keys."""
+def load_env_file(env_path: Path) -> dict:
+    """Parse flat .env credentials and return normalized keys."""
     if not env_path.exists():
         raise FileNotFoundError(f".env file not found: {env_path}")
 
@@ -52,15 +50,10 @@ def load_env_file(env_path: Path, section: Optional[str] = None) -> dict:
             if "=" not in line:
                 continue
 
-            if section is None:
-                # Flat mode: only parse top-level key/value pairs.
-                if current_section is not None:
-                    continue
+            # Flat mode: only parse top-level key/value pairs.
+            if current_section is None:
                 key, value = line.split("=", 1)
                 cfg[key.strip()] = value.strip().strip('"').strip("'")
-            elif current_section == section:
-                key, value = line.split("=", 1)
-                cfg[key.strip()] = value.strip()
 
     normalized = {
         "TeamserverURL": cfg.get("TEAMSERVER_URL") or cfg.get("TeamserverURL") or cfg.get("url"),
@@ -72,9 +65,7 @@ def load_env_file(env_path: Path, section: Optional[str] = None) -> dict:
     required = ["TeamserverURL", "ORG_UUID", "AUTH", "API_KEY"]
     missing = [k for k in required if not normalized.get(k)]
     if missing:
-        if section is None:
-            raise ValueError(f"Missing required keys in {env_path}: {', '.join(missing)}")
-        raise ValueError(f"Missing required keys in section [{section}] of {env_path}: {', '.join(missing)}")
+        raise ValueError(f"Missing required keys in {env_path}: {', '.join(missing)}")
 
     return normalized
 
@@ -90,21 +81,6 @@ def build_headers(creds: dict) -> dict:
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
-
-
-def section_name_prefix(section: Optional[str]) -> str:
-    """Derive a safe filename prefix from section label.
-
-    Examples:
-      "Staging Auth" -> "Staging"
-      "Acme Auth" -> "Acme"
-    """
-    label = (section or "report").strip()
-    if label.lower().endswith(" auth"):
-        label = label[: -len(" auth")].strip()
-
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", label).strip("._-")
-    return safe or "unknown"
 
 
 def extract_app_id(app: dict) -> str:
@@ -490,7 +466,6 @@ def parse_args() -> argparse.Namespace:
         description="Generate used OSS reports (Markdown + CSV) grouped by application and environment"
     )
     parser.add_argument("--env-file", help="Path to .env file (default: [repo-root]/.env)")
-    parser.add_argument("--env-section", help="Optional credential section for legacy sectioned .env files")
     parser.add_argument(
         "--quick-filter",
         default="ALL",
@@ -512,7 +487,7 @@ def main() -> int:
     env_path = Path(args.env_file) if args.env_file else (repo_root / ".env")
 
     try:
-        creds = load_env_file(env_path, args.env_section)
+        creds = load_env_file(env_path)
     except Exception as exc:
         print(f"ERROR loading credentials: {exc}", file=sys.stderr)
         return 1
@@ -523,11 +498,9 @@ def main() -> int:
 
     generated_at = datetime.now(timezone.utc)
     date_stamp = generated_at.strftime("%Y-%m-%d")
-    name_prefix = section_name_prefix(args.env_section)
-
     output_dir = Path(__file__).resolve().parent / "Output"
-    md_path = output_dir / f"{name_prefix}_used_oss_by_app_{date_stamp}.md"
-    csv_path = output_dir / f"{name_prefix}_used_oss_by_app_{date_stamp}.csv"
+    md_path = output_dir / f"used_oss_by_app_{date_stamp}.md"
+    csv_path = output_dir / f"used_oss_by_app_{date_stamp}.csv"
 
     print("Fetching applications...")
     app_name_map = fetch_all_applications(base_url, org_uuid, headers)

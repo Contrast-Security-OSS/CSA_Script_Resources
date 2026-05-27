@@ -17,14 +17,13 @@ Run with no arguments for a fully guided experience:
 
 Or pass flags to skip prompts:
 
-    python generate_app_report.py --env-file .env --env-section "Prod" --tag "my-tag"
-    python generate_app_report.py --env-file .env --env-section "Prod" --app-name "MyApp"
-    python generate_app_report.py --env-file .env --env-section "Prod" --output report.md
+    python generate_app_report.py --env-file .env --tag "my-tag"
+    python generate_app_report.py --env-file .env --app-name "MyApp"
+    python generate_app_report.py --env-file .env --output report.md
 
 Options
 -------
   --env-file PATH       .env file path (default: .env)
-  --env-section NAME    Skip the credential prompt by naming the section directly
   --tag TAG             Filter apps by tag instead of picking interactively
   --app-name NAME       Select a single app by name instead of picking interactively
   --output PATH         Write report to PATH instead of stdout
@@ -88,8 +87,8 @@ def find_repo_root(start: Path) -> Path:
     return current
 
 
-def load_root_credentials(env_path: Path, section: Optional[str] = None) -> dict:
-    """Load credentials from flat .env or an optional legacy section."""
+def load_root_credentials(env_path: Path) -> dict:
+    """Load credentials from flat root .env."""
     if not env_path.exists():
         raise FileNotFoundError(f".env file not found: {env_path}")
 
@@ -111,10 +110,7 @@ def load_root_credentials(env_path: Path, section: Optional[str] = None) -> dict
             key = key.strip()
             value = value.strip().strip('"').strip("'")
 
-            if section is None:
-                if current_section is None:
-                    cfg[key] = value
-            elif current_section == section:
+            if current_section is None:
                 cfg[key] = value
 
     normalized = {
@@ -127,96 +123,9 @@ def load_root_credentials(env_path: Path, section: Optional[str] = None) -> dict
     required = ["TeamserverURL", "ORG_UUID", "AUTH", "API_KEY"]
     missing = [k for k in required if not normalized.get(k)]
     if missing:
-        if section is None:
-            raise ValueError(f"Missing required env keys in {env_path}: {', '.join(missing)}")
-        raise ValueError(f"Missing required env keys in [{section}] of {env_path}: {', '.join(missing)}")
+        raise ValueError(f"Missing required env keys in {env_path}: {', '.join(missing)}")
 
     return normalized
-
-def load_env_file(env_path: Path, section: str) -> dict:
-    """Parse a sectioned .env file and return credentials for *section*."""
-    if not env_path.exists():
-        print(f"ERROR: .env file not found: {env_path}", file=sys.stderr)
-        sys.exit(1)
-
-    creds: dict = {}
-    current_section: Optional[str] = None
-
-    with open(env_path) as fh:
-        for raw in fh:
-            line = raw.strip()
-            if line.startswith("[") and line.endswith("]"):
-                current_section = line[1:-1].strip()
-                continue
-            if section and current_section != section:
-                continue
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                creds[k.strip()] = v.strip()
-
-    required = ["TeamserverURL", "ORG_UUID", "AUTH", "API_KEY"]
-    missing = [k for k in required if k not in creds]
-    if missing:
-        print(
-            f"ERROR: Missing credentials in .env section '{section}': {', '.join(missing)}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    return creds
-
-
-def list_env_sections(env_path: Path) -> List[str]:
-    """Return all section names found in a .env file."""
-    sections: List[str] = []
-    if not env_path.exists():
-        return sections
-    with open(env_path) as fh:
-        for raw in fh:
-            line = raw.strip()
-            if line.startswith("[") and line.endswith("]"):
-                sections.append(line[1:-1].strip())
-    return sections
-
-
-def interactive_section_selection(env_path: Path) -> str:
-    """
-    List credential sections found in *env_path* and prompt the user to
-    pick one.  Returns the chosen section name.
-    """
-    sections = list_env_sections(env_path)
-
-    if not sections:
-        print(
-            f"\nNo sections found in {env_path}.  "
-            "Add sections like [Production Auth] to your .env file.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    print("\n" + "=" * 60)
-    print("  SELECT CREDENTIALS")
-    print("=" * 60)
-    print(f"  Source: {env_path}\n")
-    for i, section in enumerate(sections, 1):
-        print(f"  [{i}]  {section}")
-    print()
-
-    while True:
-        raw = input("Selection [1]: ").strip()
-        if raw == "":
-            return sections[0]
-        try:
-            idx = int(raw) - 1
-            if 0 <= idx < len(sections):
-                return sections[idx]
-        except ValueError:
-            pass
-        # Allow typing the section name directly
-        match = [s for s in sections if s.lower() == raw.lower()]
-        if match:
-            return match[0]
-        print(f"  Invalid choice — enter a number between 1 and {len(sections)}")
 
 
 def build_headers(creds: dict) -> dict:
@@ -1688,10 +1597,6 @@ def main():
         "--env-file", type=Path,
         help="Path to .env file with credentials (default: [repo-root]/.env)"
     )
-    parser.add_argument(
-        "--env-section", type=str, default=None,
-        help='Section in .env file, e.g. "Production Auth" (prompted if omitted)'
-    )
 
     # Selection modes — all optional; defaults to interactive
     sel = parser.add_mutually_exclusive_group()
@@ -1703,8 +1608,8 @@ def main():
         help="Output file path (default: print to stdout)"
     )
     parser.add_argument(
-        "--customer-name", type=str,
-        help="Customer name for report branding (skips prompt when provided)"
+        "--report-name", type=str,
+        help="Report title prefix (skips prompt when provided)"
     )
     parser.add_argument(
         "--days", type=int, default=365,
@@ -1722,17 +1627,14 @@ def main():
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
-    # Step 1 — credential selection (interactive if --env-section omitted)
+    # Step 1 — credential loading from root .env
     # ------------------------------------------------------------------
     repo_root = find_repo_root(Path.cwd())
     env_file = args.env_file if args.env_file else (repo_root / ".env")
 
-    if args.env_section:
-        print(f"Loading credentials from {env_file} [{args.env_section}] ...")
-    else:
-        print(f"Loading credentials from {env_file} ...")
+    print(f"Loading credentials from {env_file} ...")
 
-    creds = load_root_credentials(env_file, args.env_section)
+    creds = load_root_credentials(env_file)
     base_url = normalise_base_url(creds["TeamserverURL"])
     org_uuid = creds["ORG_UUID"]
     headers = build_headers(creds)
@@ -1774,11 +1676,11 @@ def main():
     for a in selected_apps:
         print(f"    • {a['name']} ({a.get('language', '?')}) — {a.get('status', '?')}")
 
-    # Customer / account name for report branding
-    customer_name = args.customer_name or ""
-    if not customer_name:
-        print("\nCustomer / account name (for report title and filename): ", end="", flush=True)
-        customer_name = input().strip()
+    # Report name for title and filename
+    report_name = args.report_name or ""
+    if not report_name:
+        print("\nReport name (for report title and filename): ", end="", flush=True)
+        report_name = input().strip()
 
     # ------------------------------------------------------------------
     # Load agent version reference data (for proper top-3 / 3-month check)
@@ -1892,7 +1794,7 @@ def main():
         staleness_map=staleness_map,
         servers_map=servers_map,
         timeframe_days=args.days,
-        customer_name=customer_name,
+        customer_name=report_name,
     )
 
     # ------------------------------------------------------------------
@@ -1908,7 +1810,7 @@ def main():
         def _safe(s: str) -> str:
             return re.sub(r'[^\w\-]', '_', s).strip('_')
 
-        safe_customer = _safe(customer_name) if customer_name else "Contrast"
+        safe_customer = _safe(report_name) if report_name else "Contrast"
         safe_label = _safe(label.split("(")[0])
 
         # Ask about PDF export
@@ -1938,7 +1840,7 @@ def main():
         if convert_to_pdf(
             md_path,
             output_path,
-            customer_name=customer_name,
+            customer_name=report_name,
             selection_label=label,
             date_str=datetime.now().strftime("%B %d, %Y"),
         ):

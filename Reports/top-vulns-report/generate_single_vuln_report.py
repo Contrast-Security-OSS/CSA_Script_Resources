@@ -26,7 +26,7 @@ def find_repo_root(start: Path) -> Path:
     return current
 
 
-def load_credentials(env_file: Path, env_section: Optional[str] = None) -> Dict[str, str]:
+def load_credentials(env_file: Path) -> Dict[str, str]:
     if not env_file.exists():
         raise FileNotFoundError(f".env file not found: {env_file}")
 
@@ -46,10 +46,7 @@ def load_credentials(env_file: Path, env_section: Optional[str] = None) -> Dict[
             key = key.strip()
             value = value.strip().strip('"').strip("'")
 
-            if env_section is None:
-                if current_section is None:
-                    cfg[key] = value
-            elif current_section == env_section:
+            if current_section is None:
                 cfg[key] = value
 
     base_url = cfg.get("TEAMSERVER_URL") or cfg.get("TeamserverURL") or cfg.get("url")
@@ -67,8 +64,7 @@ def load_credentials(env_file: Path, env_section: Optional[str] = None) -> Dict[
     if not auth_header:
         missing.append("CONTRAST_AUTH/AUTH")
     if missing:
-        where = f"[{env_section}] in {env_file}" if env_section else str(env_file)
-        raise ValueError(f"Missing required keys in {where}: {', '.join(missing)}")
+        raise ValueError(f"Missing required keys in {env_file}: {', '.join(missing)}")
 
     return {
         "url": base_url,
@@ -81,11 +77,11 @@ def load_credentials(env_file: Path, env_section: Optional[str] = None) -> Dict[
 class SingleVulnReportGenerator:
     """Generate a detailed report for the top 1 vulnerability"""
     
-    def __init__(self, env_file: Optional[str] = None, env_section: Optional[str] = None):
-        """Initialize with credentials from root .env or optional legacy section."""
+    def __init__(self, env_file: Optional[str] = None):
+        """Initialize with credentials from root .env."""
         repo_root = find_repo_root(Path.cwd())
         path = Path(env_file) if env_file else (repo_root / ".env")
-        auth_config = load_credentials(path, env_section)
+        auth_config = load_credentials(path)
 
         self.base_url = auth_config['url']
         self.org_id = auth_config['organizationId']
@@ -608,13 +604,12 @@ def main():
     try:
         parser = argparse.ArgumentParser(description="Generate top vulnerability report")
         parser.add_argument('--env-file', help='Path to .env file (default: [repo-root]/.env)')
-        parser.add_argument('--env-section', help='Optional section in legacy sectioned .env file')
         parser.add_argument('--app-name', help='Application name (skip interactive selection)')
         parser.add_argument('--output', help='Output markdown path (default: script Output folder)')
         args = parser.parse_args()
 
         # Initialize generator
-        generator = SingleVulnReportGenerator(args.env_file, args.env_section)
+        generator = SingleVulnReportGenerator(args.env_file)
         
         # Step 1: Get licensed applications
         apps = generator.get_licensed_applications()
