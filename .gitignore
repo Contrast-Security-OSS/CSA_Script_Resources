@@ -1,0 +1,11 @@
+tmp/
+.env
+*/Output/
+Output/
+.ipynb_checkpoints/
+__pycache__/
+.DS_Store
+*.pyc
+.venv/
+.vscode/
+.pre-commit-cache/
