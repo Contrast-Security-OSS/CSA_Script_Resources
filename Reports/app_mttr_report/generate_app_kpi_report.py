@@ -10,8 +10,8 @@ This script produces comprehensive KPI metrics for individual applications inclu
 - Critical libraries with class usage
 
 Usage:
-    python3 generate_app_kpi_report.py --env-file .env --env-section "Staging Auth" --app-name "MyApp"
-    python3 generate_app_kpi_report.py --env-file .env --env-section "Staging Auth" --app-id "abc-123" --days 365
+    python3 generate_app_kpi_report.py --env-file .env --app-name "MyApp"
+    python3 generate_app_kpi_report.py --env-file .env --app-id "abc-123" --days 365
 """
 
 import argparse
@@ -31,14 +31,12 @@ def find_repo_root(start: Path) -> Path:
     return current
 
 
-def load_env_file(env_path: str, section: Optional[str] = None) -> dict:
+def load_env_file(env_path: str) -> dict:
     """
-    Parse a .env file with sections and return credentials for the specified section.
+    Parse a flat .env file and return normalized credentials.
     
     Args:
         env_path: Path to .env file
-        section: Section name like "Staging Auth" or "Production Auth"
-    
     Returns:
         Dictionary with TeamserverURL, ORG_UUID, AUTH, API_KEY
     """
@@ -63,12 +61,6 @@ def load_env_file(env_path: str, section: Optional[str] = None) -> dict:
             key = key.strip()
             value = value.strip().strip('"').strip("'")
 
-            # Sectioned mode when section is provided.
-            if section is not None:
-                if current_section == section:
-                    config[key] = value
-                continue
-
             # Flat mode ignores sectioned key/value pairs.
             if current_section is None:
                 config[key] = value
@@ -84,9 +76,7 @@ def load_env_file(env_path: str, section: Optional[str] = None) -> dict:
     required = ['TeamserverURL', 'ORG_UUID', 'AUTH', 'API_KEY']
     missing = [k for k in required if not normalized.get(k)]
     if missing:
-        if section is not None:
-            raise ValueError(f"Missing required config in [{section}]: {missing}")
-        raise ValueError(f"Missing required flat env config: {missing}")
+        raise ValueError(f"Missing required env config: {missing}")
 
     return normalized
 
@@ -577,7 +567,6 @@ def main():
         description='Generate per-application KPI dashboard report from Contrast Security data'
     )
     parser.add_argument('--env-file', help='Path to .env file (default: [repo-root]/.env)')
-    parser.add_argument('--env-section', help='Optional section name for legacy sectioned .env files')
     parser.add_argument('--app-id', help='Application ID')
     parser.add_argument('--app-name', help='Application name')
     parser.add_argument('--days', type=int, default=365, help='Analysis timeframe in days (default: 365)')
@@ -591,11 +580,8 @@ def main():
     # Load credentials
     repo_root = find_repo_root(Path.cwd())
     env_path = Path(args.env_file) if args.env_file else (repo_root / '.env')
-    if args.env_section:
-        print(f"Loading credentials from {env_path} [{args.env_section}] ...")
-    else:
-        print(f"Loading credentials from {env_path} ...")
-    config = load_env_file(str(env_path), args.env_section)
+    print(f"Loading credentials from {env_path} ...")
+    config = load_env_file(str(env_path))
     
     base_url = config['TeamserverURL']
     if not base_url.endswith('/'):
